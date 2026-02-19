@@ -1,0 +1,24 @@
+# --- Large datasets (TSP examples) ---
+examples/user_tsp_gls/TrainingData/
+examples/user_tsp_gls/TestingData/
+
+# --- Generated evaluation outputs ---
+examples/tsp_construct/evaluation/
+**/evaluation/
+**/results/
+**/pops/
+**/pops_best/
+**/diag_logs/
+
+# --- Python / OS ---
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store
+
+# --- Archives ---
+*.zip
+*.tar
+*.tar.gz
+
