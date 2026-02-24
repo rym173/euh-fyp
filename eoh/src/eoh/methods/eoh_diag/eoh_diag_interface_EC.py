@@ -2,11 +2,44 @@ import numpy as np
 import time
 import warnings
 import re
-import concurrent.futures
+import multiprocessing as mp
 from joblib import Parallel, delayed
 
 from .eoh_diag_evolution import EvolutionDiag
 from ..eoh.evaluator_accelerate import add_numba_decorator
+
+
+def _get_mp_context():
+    methods = mp.get_all_start_methods()
+    if "fork" in methods:
+        return mp.get_context("fork")
+    return mp.get_context("spawn")
+
+
+def _evaluate_code_worker(interface_eval, code, out_q):
+    try:
+        out_q.put(interface_eval.evaluate(code))
+    except Exception:
+        out_q.put(None)
+
+
+def _evaluate_with_timeout(interface_eval, code, timeout_sec):
+    ctx = _get_mp_context()
+    out_q = ctx.Queue(maxsize=1)
+    proc = ctx.Process(target=_evaluate_code_worker, args=(interface_eval, code, out_q))
+    proc.start()
+    proc.join(timeout_sec)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join()
+        return None, "timeout"
+    result = None
+    if not out_q.empty():
+        try:
+            result = out_q.get_nowait()
+        except Exception:
+            result = None
+    return result, None
 
 
 class InterfaceECDiag:
@@ -121,11 +154,10 @@ class InterfaceECDiag:
                 if n_retry > 1:
                     break
 
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self.interface_eval.evaluate, code)
-                fitness = future.result(timeout=self.timeout)
-                offspring['objective'] = np.round(fitness, 5) if fitness is not None else None
-                future.cancel()
+            fitness, status = _evaluate_with_timeout(self.interface_eval, code, self.timeout)
+            if status == "timeout" and self.debug:
+                print("Evaluation timeout in get_offspring.")
+            offspring['objective'] = np.round(fitness, 5) if fitness is not None else None
         except Exception:
             offspring = {'algorithm': None, 'code': None, 'objective': None, 'other_inf': None}
             p = None
@@ -134,7 +166,7 @@ class InterfaceECDiag:
     def get_algorithm(self, pop, operator):
         results = []
         try:
-            results = Parallel(n_jobs=self.n_p, timeout=self.timeout + 15)(
+            results = Parallel(n_jobs=self.n_p, timeout=self.timeout + 60)(
                 delayed(self.get_offspring)(pop, operator) for _ in range(self.pop_size)
             )
         except Exception as e:

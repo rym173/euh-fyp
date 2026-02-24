@@ -5,7 +5,40 @@ import warnings
 from joblib import Parallel, delayed
 from .evaluator_accelerate import add_numba_decorator
 import re
-import concurrent.futures
+import multiprocessing as mp
+
+
+def _get_mp_context():
+    methods = mp.get_all_start_methods()
+    if "fork" in methods:
+        return mp.get_context("fork")
+    return mp.get_context("spawn")
+
+
+def _evaluate_code_worker(interface_eval, code, out_q):
+    try:
+        out_q.put(interface_eval.evaluate(code))
+    except Exception:
+        out_q.put(None)
+
+
+def _evaluate_with_timeout(interface_eval, code, timeout_sec):
+    ctx = _get_mp_context()
+    out_q = ctx.Queue(maxsize=1)
+    proc = ctx.Process(target=_evaluate_code_worker, args=(interface_eval, code, out_q))
+    proc.start()
+    proc.join(timeout_sec)
+    if proc.is_alive():
+        proc.terminate()
+        proc.join()
+        return None, "timeout"
+    result = None
+    if not out_q.empty():
+        try:
+            result = out_q.get_nowait()
+        except Exception:
+            result = None
+    return result, None
 
 class InterfaceEC():
     def __init__(self, pop_size, m, api_endpoint, api_key, llm_model,llm_use_local,llm_local_url, debug_mode, interface_prob, select,n_p,timeout,use_numba,**kwargs):
@@ -25,6 +58,7 @@ class InterfaceEC():
         self.n_p = n_p
         
         self.timeout = timeout
+        print("InterfaceEC.timeout =", self.timeout)
         self.use_numba = use_numba
         
     def code2file(self,code):
@@ -177,13 +211,10 @@ class InterfaceEC():
                     break
                 
                 
-            #self.code2file(offspring['code'])
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(self.interface_eval.evaluate, code)
-                fitness = future.result(timeout=self.timeout)
-                offspring['objective'] = np.round(fitness, 5)
-                future.cancel()        
-                # fitness = self.interface_eval.evaluate(code)
+            fitness, status = _evaluate_with_timeout(self.interface_eval, code, self.timeout)
+            if status == "timeout" and self.debug:
+                print("Evaluation timeout in get_offspring.")
+            offspring['objective'] = np.round(fitness, 5) if fitness is not None else None
                 
 
         except Exception as e:
@@ -220,7 +251,7 @@ class InterfaceEC():
     def get_algorithm(self, pop, operator):
         results = []
         try:
-            results = Parallel(n_jobs=self.n_p,timeout=self.timeout+15)(delayed(self.get_offspring)(pop, operator) for _ in range(self.pop_size))
+            results = Parallel(n_jobs=self.n_p,timeout=self.timeout+60)(delayed(self.get_offspring)(pop, operator) for _ in range(self.pop_size))
         except Exception as e:
             if self.debug:
                 print(f"Error: {e}")
@@ -233,6 +264,8 @@ class InterfaceEC():
         out_off = []
 
         for p, off in results:
+            if off is None or off.get('objective') is None or off.get('code') is None:
+                continue
             out_p.append(p)
             out_off.append(off)
             if self.debug:
