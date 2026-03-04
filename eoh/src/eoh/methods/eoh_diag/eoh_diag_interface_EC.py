@@ -110,6 +110,9 @@ class InterfaceECDiag:
         elif operator == 'e1':
             parents = self.select.parent_selection(pop, self.m)
             offspring['code'], offspring['algorithm'] = self.evol.e1(parents)
+        elif operator == 'e2':
+            parents = self.select.parent_selection(pop, self.m)
+            offspring['code'], offspring['algorithm'] = self.evol.e2(parents)
         elif operator == 'm1':
             parents = self.select.parent_selection(pop, 1)
             offspring['code'], offspring['algorithm'] = self.evol.m1(parents[0])

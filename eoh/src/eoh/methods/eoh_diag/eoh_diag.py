@@ -638,8 +638,9 @@ class EOH_DIAG:
         )
 
         # Determinism
-        random.seed(2024)
-        np.random.seed(2024)
+        self.random_seed = getattr(paras, "exp_random_seed", 2024)
+        random.seed(self.random_seed)
+        np.random.seed(self.random_seed)
 
         print("- EoH parameters loaded -")
 

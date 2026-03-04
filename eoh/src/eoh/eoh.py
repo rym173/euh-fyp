@@ -1,5 +1,6 @@
 
 import random
+import numpy as np
 
 from .utils import createFolders
 from .methods import methods
@@ -24,8 +25,10 @@ class EVOL:
 
         self.prob = prob
 
-        # Set a random seed
-        random.seed(2024)
+        # Set deterministic seeds for reproducibility across runs.
+        self.random_seed = getattr(paras, "exp_random_seed", 2024)
+        random.seed(self.random_seed)
+        np.random.seed(self.random_seed)
 
         
     # run methods

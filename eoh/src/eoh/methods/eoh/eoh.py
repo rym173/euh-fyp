@@ -61,7 +61,9 @@ class EOH:
         print("- EoH parameters loaded -")
 
         # Set a random seed
-        random.seed(2024)
+        self.random_seed = getattr(paras, "exp_random_seed", 2024)
+        random.seed(self.random_seed)
+        np.random.seed(self.random_seed)
 
     # add new individual to population
     def add2pop(self, population, offspring):

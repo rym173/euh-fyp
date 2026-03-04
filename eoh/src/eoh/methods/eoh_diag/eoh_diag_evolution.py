@@ -84,6 +84,28 @@ class EvolutionDiag:
         )
         return self._build_prompt(header, "")
 
+    def get_prompt_e2(self, indivs):
+        prompt_indiv = ""
+        for i in range(len(indivs)):
+            prompt_indiv += (
+                "No."
+                + str(i + 1)
+                + " algorithm and the corresponding code are: \n"
+                + indivs[i]["algorithm"]
+                + "\n"
+                + indivs[i]["code"]
+                + "\n"
+            )
+        header = (
+            "I have "
+            + str(len(indivs))
+            + " existing algorithms with their codes as follows: \n"
+            + prompt_indiv
+            + "Please help me create a new algorithm that has a totally different form from the given ones but can be motivated from them. "
+            + "Firstly, identify the common backbone idea in the provided algorithms. Secondly, based on the backbone idea describe your new algorithm in one sentence."
+        )
+        return self._build_prompt(header, "")
+
     def get_prompt_m1(self, indiv1):
         header = (
             "I have one algorithm with its code as follows. "
@@ -170,6 +192,14 @@ class EvolutionDiag:
         prompt_content = self.get_prompt_e1(parents)
         if self.debug_mode:
             print("\n >>> check prompt for creating algorithm using [ e1 ] : \n", prompt_content)
+            print(">>> Press 'Enter' to continue")
+            input()
+        return self._get_alg(prompt_content)
+
+    def e2(self, parents):
+        prompt_content = self.get_prompt_e2(parents)
+        if self.debug_mode:
+            print("\n >>> check prompt for creating algorithm using [ e2 ] : \n", prompt_content)
             print(">>> Press 'Enter' to continue")
             input()
         return self._get_alg(prompt_content)

@@ -38,6 +38,7 @@ class Paras():
         self.exp_continue_id = 0
         self.exp_continue_path = "./results/pops/population_generation_0.json"
         self.exp_n_proc = 1
+        self.exp_random_seed = 2024
         
         #####################
         ###  Evaluation settings  ###
