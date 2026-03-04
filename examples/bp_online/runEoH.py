@@ -9,9 +9,9 @@ paras = Paras()
 # Set parameters #
 paras.set_paras(method = "eoh",    # ['ael','eoh']
                 problem = "bp_online", #['tsp_construct','bp_online']
-                llm_api_endpoint = "http://127.0.0.1:11434",
-                llm_api_key = "local",
-                llm_model = "qwen2.5-coder:14b-instruct",
+                llm_api_endpoint = "vllm-nodeport.vllm-ns.svc.cluster.local:8000",
+                llm_api_key = "EMPTY",  # works if your vLLM has no auth; otherwise put real key
+                llm_model = "Qwen3.5-122B-A10B-FP8",
                 ec_operators = ['e1','m1','m2'],
                 ec_operator_weights = [1,1,1],
                 ec_pop_size = 6, # number of samples in each population
