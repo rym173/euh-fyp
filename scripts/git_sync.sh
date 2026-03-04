@@ -5,6 +5,21 @@ set -euo pipefail
 # Usage:
 #   ./scripts/git_sync.sh "your commit message"
 #   ./scripts/git_sync.sh
+#   ./scripts/git_sync.sh --help
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/git_sync.sh [commit_message]
+
+Pull latest remote changes (rebase), stage all local changes, commit, and push.
+If commit_message is omitted, a timestamped message is used.
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "Error: run this script inside a Git repository."
