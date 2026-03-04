@@ -35,6 +35,16 @@ bash /home/jovyan/work/EoH-modified/scripts/kubeflow_sync.sh \
   /home/jovyan/work/EoH-modified
 ```
 
+By default, this sync script only runs `pip install -e` on first clone to avoid dirty generated files.
+If you need to reinstall manually:
+
+```bash
+KUBEFLOW_SYNC_REINSTALL=1 bash /home/jovyan/work/EoH-modified/scripts/kubeflow_sync.sh \
+  https://github.com/rym173/euh-fyp.git \
+  clean-main \
+  /home/jovyan/work/EoH-modified
+```
+
 ## 3) Run your project in Kubeflow
 
 After sync:
