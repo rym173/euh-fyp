@@ -142,6 +142,12 @@ class EOH:
                     json.dump(population, f, indent=5)
                 n_start = 0
 
+        if len(population) == 0:
+            raise RuntimeError(
+                "Initial population is empty after retries. "
+                "Increase eva_timeout, reduce exp_n_proc/ec_pop_size, or check LLM endpoint performance."
+            )
+
         # main loop
         n_op = len(self.operators)
 
@@ -177,6 +183,11 @@ class EOH:
                 json.dump(population, f, indent=5)
 
             # Save the best one to a file
+            if len(population) == 0:
+                raise RuntimeError(
+                    f"Population became empty at generation {pop + 1}. "
+                    "Try lower exp_n_proc or longer eva_timeout."
+                )
             filename = self.output_path + "/results/pops_best/population_generation_" + str(pop + 1) + ".json"
             with open(filename, 'w') as f:
                 json.dump(population[0], f, indent=5)

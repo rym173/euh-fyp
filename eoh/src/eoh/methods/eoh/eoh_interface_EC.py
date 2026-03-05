@@ -100,10 +100,13 @@ class InterfaceEC():
         
         population = []
 
-        for i in range(n_create):
-            _,pop = self.get_algorithm([],'i1')
-            for p in pop:
-                population.append(p)
+        attempts = 0
+        while attempts < 3 and len(population) == 0:
+            for _ in range(n_create):
+                _, pop = self.get_algorithm([], 'i1')
+                for p in pop:
+                    population.append(p)
+            attempts += 1
              
         return population
     
