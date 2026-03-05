@@ -233,7 +233,7 @@ class BPONLINE():
             #print("Error:", str(e))
             return None
 
-    def evaluate_with_signals(self, code_string, max_instances=None, max_items=None):
+    def evaluate_with_signals(self, code_string, max_instances=None, max_items=None, instance_keys=None):
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -243,11 +243,18 @@ class BPONLINE():
                 sys.modules[heuristic_module.__name__] = heuristic_module
 
                 eval_instances = []
-                for name, dataset in self.instances.items():
-                    for inst_id, instance in dataset.items():
-                        eval_instances.append((name, str(inst_id), instance))
-                if max_instances is not None:
-                    eval_instances = eval_instances[:max_instances]
+                if instance_keys is not None:
+                    for name, inst_id in instance_keys:
+                        dataset = self.instances.get(name, {})
+                        instance = dataset.get(inst_id)
+                        if instance is not None:
+                            eval_instances.append((name, str(inst_id), instance))
+                else:
+                    for name, dataset in self.instances.items():
+                        for inst_id, instance in dataset.items():
+                            eval_instances.append((name, str(inst_id), instance))
+                    if max_instances is not None:
+                        eval_instances = eval_instances[:max_instances]
 
                 objectives = []
                 runtimes_ms = []
@@ -387,6 +394,8 @@ class BPONLINE():
                         "phase_opened_frac_late": phase_late_frac,
                     },
                     "per_instance": per_instance_sorted,
+                    "per_instance_all": per_instance,
+                    "evaluated_instance_count": len(per_instance),
                 }
         except Exception:
             return {
@@ -410,4 +419,6 @@ class BPONLINE():
                     "phase_opened_frac_late": 0.0,
                 },
                 "per_instance": [],
+                "per_instance_all": [],
+                "evaluated_instance_count": 0,
             }

@@ -573,6 +573,45 @@ def _is_patch_better(parent_eval, patched_eval, eps, worst_delta, fail_delta):
     return False
 
 
+def _per_instance_objective_map(eval_payload):
+    rows = (eval_payload or {}).get("per_instance_all") or (eval_payload or {}).get("per_instance") or []
+    mapping = {}
+    for row in rows:
+        try:
+            key = (str(row.get("dataset")), str(row.get("instance")))
+            mapping[key] = float(row.get("objective"))
+        except Exception:
+            continue
+    return mapping
+
+
+def _paired_improvement_pass(parent_eval, patched_eval, eps, ci_z, min_improvement):
+    parent_map = _per_instance_objective_map(parent_eval)
+    patched_map = _per_instance_objective_map(patched_eval)
+    common_keys = sorted(set(parent_map.keys()) & set(patched_map.keys()))
+    if not common_keys:
+        return False, {"n_pairs": 0, "mean_delta": None, "ci_upper": None}
+
+    deltas = np.array([patched_map[k] - parent_map[k] for k in common_keys], dtype=float)
+    n_pairs = int(len(deltas))
+    mean_delta = float(np.mean(deltas))
+    if n_pairs > 1:
+        std_delta = float(np.std(deltas, ddof=1))
+    else:
+        std_delta = 0.0
+    ci_upper = mean_delta + float(ci_z) * (std_delta / np.sqrt(max(1, n_pairs)))
+    target = -(float(min_improvement) + float(eps))
+    is_better = ci_upper < target
+
+    return is_better, {
+        "n_pairs": n_pairs,
+        "mean_delta": mean_delta,
+        "std_delta": std_delta,
+        "ci_upper": float(ci_upper),
+        "target": float(target),
+    }
+
+
 class EOH_DIAG:
     def __init__(self, paras, problem, select, manage, **kwargs):
         self.prob = problem
@@ -607,6 +646,7 @@ class EOH_DIAG:
         self.exp_n_proc = paras.exp_n_proc
         self.timeout = paras.eva_timeout
         self.use_numba = paras.eva_numba_decorator
+        self.single_timeout_layer = getattr(paras, "exp_single_timeout_layer", True)
         self.diag_top_k = 3
         self.diag_quick_instances = 2
         self.diag_quick_items = 1500
@@ -627,6 +667,13 @@ class EOH_DIAG:
         self.diag_quick_relax_delta = 0.001
         self.diag_force_full_eval_every = 4
         self.diag_reject_numeric_only_llm = True
+        self.diag_fair_mode = getattr(paras, "diag_fair_mode", False)
+        self.diag_stage1_instances = getattr(paras, "diag_stage1_instances", self.diag_quick_instances)
+        self.diag_stage2_instances = getattr(paras, "diag_stage2_instances", max(self.diag_quick_instances, self.diag_stage1_instances))
+        self.diag_stage1_items = getattr(paras, "diag_stage1_items", self.diag_quick_items)
+        self.diag_stage2_items = getattr(paras, "diag_stage2_items", None)
+        self.diag_paired_ci_z = float(getattr(paras, "diag_paired_ci_z", 0.0))
+        self.diag_min_paired_improvement = float(getattr(paras, "diag_min_paired_improvement", 0.0))
 
         self.diag_llm = InterfaceLLM(
             self.api_endpoint,
@@ -641,6 +688,7 @@ class EOH_DIAG:
         self.random_seed = getattr(paras, "exp_random_seed", 2024)
         random.seed(self.random_seed)
         np.random.seed(self.random_seed)
+        self.diag_rng = np.random.default_rng(self.random_seed + 17)
 
         print("- EoH parameters loaded -")
 
@@ -664,6 +712,66 @@ class EOH_DIAG:
         self.diag_stagnant_generations += 1
         if self.diag_stagnant_generations >= self.diag_stagnation_window:
             self.diag_min_objective_gain = self.diag_min_objective_gain_relaxed
+
+    def _problem_instance_keys(self):
+        if not hasattr(self.prob, "instances"):
+            return []
+        keys = []
+        for name, dataset in getattr(self.prob, "instances", {}).items():
+            if isinstance(dataset, dict):
+                for inst_id in dataset.keys():
+                    keys.append((str(name), str(inst_id)))
+        return keys
+
+    def _sample_instance_keys(self, all_keys, count):
+        if not all_keys:
+            return None
+        if count is None or count <= 0 or count >= len(all_keys):
+            return list(all_keys)
+        idx = self.diag_rng.choice(len(all_keys), size=int(count), replace=False)
+        return [all_keys[i] for i in idx]
+
+    def _evaluate_subset_with_signals(self, code, instance_keys=None, max_instances=None, max_items=None):
+        try:
+            return self.prob.evaluate_with_signals(
+                code,
+                max_instances=max_instances,
+                max_items=max_items,
+                instance_keys=instance_keys,
+            )
+        except TypeError:
+            # Backward compatibility for problems that don't accept instance_keys yet.
+            return self.prob.evaluate_with_signals(
+                code,
+                max_instances=max_instances,
+                max_items=max_items,
+            )
+
+    def _quick_stage_gate(self, parent_eval_stage, patched_eval_stage):
+        parent_signals = (parent_eval_stage or {}).get("signals") or {}
+        patched_signals = (patched_eval_stage or {}).get("signals") or {}
+        parent_fail = _as_float(parent_signals.get("fail_rate"), 1.0)
+        patched_fail = _as_float(patched_signals.get("fail_rate"), 1.0)
+        parent_worst = _as_float(
+            parent_signals.get("worst_objective", (parent_eval_stage or {}).get("objective")),
+            float("inf"),
+        )
+        patched_worst = _as_float(
+            patched_signals.get("worst_objective", (patched_eval_stage or {}).get("objective")),
+            float("inf"),
+        )
+        safe_fail = patched_fail <= (parent_fail + self.diag_accept_fail_delta)
+        safe_tail = patched_worst <= (parent_worst + self.diag_accept_worst_delta)
+
+        paired_ok, paired_stats = _paired_improvement_pass(
+            parent_eval_stage,
+            patched_eval_stage,
+            self.diag_accept_eps,
+            self.diag_paired_ci_z,
+            self.diag_min_paired_improvement,
+        )
+        gate_ok = bool(paired_ok and safe_fail and safe_tail)
+        return gate_ok, paired_stats
 
     def _decode_diag_candidate(self, base_code, response):
         if not response:
@@ -754,12 +862,21 @@ class EOH_DIAG:
         diag_dir = Path(self.output_path) / "results" / "diag_logs"
         diag_dir.mkdir(parents=True, exist_ok=True)
 
-        parent_eval = self.prob.evaluate_with_signals(best_ind['code'])
-        parent_eval_quick = self.prob.evaluate_with_signals(
-            best_ind['code'],
-            max_instances=self.diag_quick_instances,
-            max_items=self.diag_quick_items,
-        )
+        parent_eval = self._evaluate_subset_with_signals(best_ind['code'])
+        all_instance_keys = self._problem_instance_keys()
+        if self.diag_fair_mode and all_instance_keys:
+            init_quick_keys = self._sample_instance_keys(all_instance_keys, self.diag_stage1_instances)
+            parent_eval_quick = self._evaluate_subset_with_signals(
+                best_ind['code'],
+                instance_keys=init_quick_keys,
+                max_items=self.diag_stage1_items,
+            )
+        else:
+            parent_eval_quick = self._evaluate_subset_with_signals(
+                best_ind['code'],
+                max_instances=self.diag_quick_instances,
+                max_items=self.diag_quick_items,
+            )
         summary = {
             "objective": parent_eval.get("objective"),
             "signals": parent_eval.get("signals"),
@@ -836,25 +953,71 @@ class EOH_DIAG:
                 self.diag_force_full_eval_every > 0
                 and (trial + 1) % self.diag_force_full_eval_every == 0
             )
+
+            parent_stage1 = parent_eval_quick
+            parent_stage2 = None
+            stage1_keys = None
+            stage2_keys = None
+            if self.diag_fair_mode and all_instance_keys:
+                stage1_keys = self._sample_instance_keys(all_instance_keys, self.diag_stage1_instances)
+                stage2_keys = self._sample_instance_keys(all_instance_keys, self.diag_stage2_instances)
+                parent_stage1 = self._evaluate_subset_with_signals(
+                    best_ind.get("code", ""),
+                    instance_keys=stage1_keys,
+                    max_items=self.diag_stage1_items,
+                )
+                parent_stage2 = self._evaluate_subset_with_signals(
+                    best_ind.get("code", ""),
+                    instance_keys=stage2_keys,
+                    max_items=self.diag_stage2_items,
+                )
+
             quick_pass = []
             for candidate in trial_candidates:
-                patched_eval_quick = self.prob.evaluate_with_signals(
-                    candidate["patched_code"],
-                    max_instances=self.diag_quick_instances,
-                    max_items=self.diag_quick_items,
-                )
-                patched_quick_obj = _as_float(patched_eval_quick.get("objective"), float("inf"))
-                quick_ok = _is_patch_better(
-                    parent_eval_quick,
-                    patched_eval_quick,
-                    self.diag_accept_eps,
-                    self.diag_accept_worst_delta,
-                    self.diag_accept_fail_delta,
-                )
-                quick_soft_ok = patched_quick_obj <= (parent_quick_obj + self.diag_quick_relax_delta)
-                candidate["patched_eval_quick"] = patched_eval_quick
-                candidate["quick_obj"] = patched_quick_obj
-                candidate["quick_ok"] = bool(quick_ok or quick_soft_ok)
+                if self.diag_fair_mode and all_instance_keys:
+                    patched_eval_stage1 = self._evaluate_subset_with_signals(
+                        candidate["patched_code"],
+                        instance_keys=stage1_keys,
+                        max_items=self.diag_stage1_items,
+                    )
+                    stage1_ok, stage1_stats = self._quick_stage_gate(parent_stage1, patched_eval_stage1)
+                    candidate["stage1_stats"] = stage1_stats
+
+                    if stage1_ok:
+                        patched_eval_quick = self._evaluate_subset_with_signals(
+                            candidate["patched_code"],
+                            instance_keys=stage2_keys,
+                            max_items=self.diag_stage2_items,
+                        )
+                        stage2_ok, stage2_stats = self._quick_stage_gate(parent_stage2, patched_eval_quick)
+                        candidate["stage2_stats"] = stage2_stats
+                        candidate["quick_ok"] = bool(stage2_ok)
+                    else:
+                        patched_eval_quick = patched_eval_stage1
+                        candidate["quick_ok"] = False
+
+                    patched_quick_obj = _as_float(patched_eval_quick.get("objective"), float("inf"))
+                    candidate["patched_eval_quick"] = patched_eval_quick
+                    candidate["quick_obj"] = patched_quick_obj
+                else:
+                    patched_eval_quick = self._evaluate_subset_with_signals(
+                        candidate["patched_code"],
+                        max_instances=self.diag_quick_instances,
+                        max_items=self.diag_quick_items,
+                    )
+                    patched_quick_obj = _as_float(patched_eval_quick.get("objective"), float("inf"))
+                    quick_ok = _is_patch_better(
+                        parent_eval_quick,
+                        patched_eval_quick,
+                        self.diag_accept_eps,
+                        self.diag_accept_worst_delta,
+                        self.diag_accept_fail_delta,
+                    )
+                    quick_soft_ok = patched_quick_obj <= (parent_quick_obj + self.diag_quick_relax_delta)
+                    candidate["patched_eval_quick"] = patched_eval_quick
+                    candidate["quick_obj"] = patched_quick_obj
+                    candidate["quick_ok"] = bool(quick_ok or quick_soft_ok)
+
                 if candidate["quick_ok"]:
                     quick_pass.append(candidate)
 
@@ -874,7 +1037,7 @@ class EOH_DIAG:
             accepted_candidates = []
             parent_obj = _as_float(parent_eval.get("objective"), float("inf"))
             for candidate in full_candidates:
-                patched_eval = self.prob.evaluate_with_signals(candidate["patched_code"])
+                patched_eval = self._evaluate_subset_with_signals(candidate["patched_code"])
                 patched_obj = _as_float(patched_eval.get("objective"), float("inf"))
                 gain = parent_obj - patched_obj
                 full_gate_ok = _is_patch_better(
@@ -930,7 +1093,7 @@ class EOH_DIAG:
         ):
             if not _validate_code(candidate_code):
                 continue
-            patched_eval_quick = self.prob.evaluate_with_signals(
+            patched_eval_quick = self._evaluate_subset_with_signals(
                 candidate_code,
                 max_instances=self.diag_quick_instances,
                 max_items=self.diag_quick_items,
@@ -947,7 +1110,7 @@ class EOH_DIAG:
             quick_soft_ok = patched_quick_obj <= (parent_quick_obj + self.diag_quick_relax_delta)
             if not (quick_ok or quick_soft_ok):
                 continue
-            patched_eval = self.prob.evaluate_with_signals(candidate_code)
+            patched_eval = self._evaluate_subset_with_signals(candidate_code)
             full_ok = _is_patch_better(
                 parent_eval,
                 patched_eval,
@@ -1014,6 +1177,7 @@ class EOH_DIAG:
             n_p=self.exp_n_proc,
             timeout=self.timeout,
             use_numba=self.use_numba,
+            single_timeout_layer=self.single_timeout_layer,
         )
 
         population = []

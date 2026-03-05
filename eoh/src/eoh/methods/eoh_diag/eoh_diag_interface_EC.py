@@ -59,6 +59,7 @@ class InterfaceECDiag:
         self.n_p = n_p
         self.timeout = timeout
         self.use_numba = use_numba
+        self.single_timeout_layer = kwargs.get("single_timeout_layer", True)
 
     def check_duplicate(self, population, code):
         for ind in population:
@@ -157,9 +158,13 @@ class InterfaceECDiag:
                 if n_retry > 1:
                     break
 
-            fitness, status = _evaluate_with_timeout(self.interface_eval, code, self.timeout)
-            if status == "timeout" and self.debug:
-                print("Evaluation timeout in get_offspring.")
+            if self.single_timeout_layer:
+                fitness = self.interface_eval.evaluate(code)
+                status = None
+            else:
+                fitness, status = _evaluate_with_timeout(self.interface_eval, code, self.timeout)
+                if status == "timeout" and self.debug:
+                    print("Evaluation timeout in get_offspring.")
             offspring['objective'] = np.round(fitness, 5) if fitness is not None else None
         except Exception:
             offspring = {'algorithm': None, 'code': None, 'objective': None, 'other_inf': None}

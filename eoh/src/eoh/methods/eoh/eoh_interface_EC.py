@@ -60,6 +60,7 @@ class InterfaceEC():
         self.timeout = timeout
         print("InterfaceEC.timeout =", self.timeout)
         self.use_numba = use_numba
+        self.single_timeout_layer = kwargs.get("single_timeout_layer", True)
         
     def code2file(self,code):
         with open("./ael_alg.py", "w") as file:
@@ -211,9 +212,13 @@ class InterfaceEC():
                     break
                 
                 
-            fitness, status = _evaluate_with_timeout(self.interface_eval, code, self.timeout)
-            if status == "timeout" and self.debug:
-                print("Evaluation timeout in get_offspring.")
+            if self.single_timeout_layer:
+                fitness = self.interface_eval.evaluate(code)
+                status = None
+            else:
+                fitness, status = _evaluate_with_timeout(self.interface_eval, code, self.timeout)
+                if status == "timeout" and self.debug:
+                    print("Evaluation timeout in get_offspring.")
             offspring['objective'] = np.round(fitness, 5) if fitness is not None else None
                 
 

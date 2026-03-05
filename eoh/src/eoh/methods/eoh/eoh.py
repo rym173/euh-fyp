@@ -57,6 +57,7 @@ class EOH:
         self.timeout = paras.eva_timeout
 
         self.use_numba = paras.eva_numba_decorator
+        self.single_timeout_layer = getattr(paras, "exp_single_timeout_layer", True)
 
         print("- EoH parameters loaded -")
 
@@ -91,7 +92,8 @@ class EOH:
         # interface for ec operators
         interface_ec = InterfaceEC(self.pop_size, self.m, self.api_endpoint, self.api_key, self.llm_model, self.use_local_llm, self.llm_local_url,
                                    self.debug_mode, interface_prob, select=self.select,n_p=self.exp_n_proc,
-                                   timeout = self.timeout, use_numba=self.use_numba
+                                   timeout = self.timeout, use_numba=self.use_numba,
+                                   single_timeout_layer=self.single_timeout_layer
                                    )
 
         # initialization

@@ -39,6 +39,18 @@ class Paras():
         self.exp_continue_path = "./results/pops/population_generation_0.json"
         self.exp_n_proc = 1
         self.exp_random_seed = 2024
+        self.exp_single_timeout_layer = True
+
+        #####################
+        ###  Diag settings ###
+        #####################
+        self.diag_fair_mode = False
+        self.diag_stage1_instances = 2
+        self.diag_stage2_instances = 4
+        self.diag_stage1_items = 1500
+        self.diag_stage2_items = None
+        self.diag_paired_ci_z = 0.0
+        self.diag_min_paired_improvement = 0.0
         
         #####################
         ###  Evaluation settings  ###

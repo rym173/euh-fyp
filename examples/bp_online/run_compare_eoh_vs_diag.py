@@ -51,6 +51,14 @@ def _build_paras(method, seed, output_path, args):
         exp_debug_mode=args.exp_debug_mode,
         exp_output_path=str(output_path),
         exp_random_seed=seed,
+        exp_single_timeout_layer=not args.allow_nested_timeout,
+        diag_fair_mode=args.diag_fair_mode,
+        diag_stage1_instances=args.diag_stage1_instances,
+        diag_stage2_instances=args.diag_stage2_instances,
+        diag_stage1_items=args.diag_stage1_items,
+        diag_stage2_items=args.diag_stage2_items,
+        diag_paired_ci_z=args.diag_paired_ci_z,
+        diag_min_paired_improvement=args.diag_min_paired_improvement,
     )
     paras.eva_timeout = args.eva_timeout
     return paras
@@ -128,6 +136,16 @@ def main():
     parser.add_argument("--eva-timeout", type=int, default=90)
     parser.add_argument("--eva-numba-decorator", action="store_true")
     parser.add_argument("--exp-debug-mode", action="store_true")
+    parser.add_argument("--allow-nested-timeout", action="store_true")
+    parser.add_argument("--diag-fair-mode", dest="diag_fair_mode", action="store_true")
+    parser.add_argument("--no-diag-fair-mode", dest="diag_fair_mode", action="store_false")
+    parser.set_defaults(diag_fair_mode=True)
+    parser.add_argument("--diag-stage1-instances", type=int, default=2)
+    parser.add_argument("--diag-stage2-instances", type=int, default=4)
+    parser.add_argument("--diag-stage1-items", type=int, default=1500)
+    parser.add_argument("--diag-stage2-items", type=int, default=3000)
+    parser.add_argument("--diag-paired-ci-z", type=float, default=0.0)
+    parser.add_argument("--diag-min-paired-improvement", type=float, default=0.0)
     args = parser.parse_args()
 
     args.ec_operators = _parse_list(args.ec_operators, str)
@@ -145,6 +163,7 @@ def main():
     print(f"Methods: {methods}")
     print(f"Seeds: {[args.seed_start + i for i in range(args.num_seeds)]}")
     print(f"Operators: {args.ec_operators}")
+    print(f"Diag fair mode: {args.diag_fair_mode} | Single timeout layer: {not args.allow_nested_timeout}")
 
     for seed in range(args.seed_start, args.seed_start + args.num_seeds):
         for method in methods:
@@ -191,6 +210,14 @@ def main():
             "ec_n_pop": args.ec_n_pop,
             "exp_n_proc": args.exp_n_proc,
             "eva_timeout": args.eva_timeout,
+            "single_timeout_layer": not args.allow_nested_timeout,
+            "diag_fair_mode": args.diag_fair_mode,
+            "diag_stage1_instances": args.diag_stage1_instances,
+            "diag_stage2_instances": args.diag_stage2_instances,
+            "diag_stage1_items": args.diag_stage1_items,
+            "diag_stage2_items": args.diag_stage2_items,
+            "diag_paired_ci_z": args.diag_paired_ci_z,
+            "diag_min_paired_improvement": args.diag_min_paired_improvement,
             "output_root": str(root),
         },
         "runs": runs,
